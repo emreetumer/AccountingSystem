@@ -65,19 +65,27 @@ public class InvoiceService : IInvoiceService
 
     public async Task<InvoiceDetailDto> CreateAsync(CreateInvoiceDto request)
     {
-        // Fatura
+        var customer = await _context.Customers.FindAsync(request.CustomerId);
+
+        if (customer == null)
+        {
+            throw new InvalidOperationException($"CustomerId {request.CustomerId} bulunamadı.");
+        }
+
+        var totalAmount = request.Items.Sum(x => x.Quantity * x.UnitPrice);
+
         var invoice = new Invoice
         {
             CustomerId = request.CustomerId,
             CreatedDate = DateTime.UtcNow,
             DueDate = request.DueDate,
-            TotalAmount = request.Items.Sum(x => x.Quantity * x.UnitPrice),
+            TotalAmount = totalAmount,
             PaidAmount = 0
         };
 
-        // Fatura kalemleri
         foreach (var item in request.Items)
         {
+            // Ürünlerin (Product) varlığı ve birim fiyatlarının kontrolü bu noktada yapılmalıdır!
             invoice.InvoiceItems.Add(new InvoiceItem
             {
                 ProductId = item.ProductId,
@@ -86,13 +94,15 @@ public class InvoiceService : IInvoiceService
             });
         }
 
+        customer.CurrentDebt += totalAmount;
+
         _context.Invoices.Add(invoice);
         await _context.SaveChangesAsync();
 
         return new InvoiceDetailDto
         {
             Id = invoice.Id,
-            CustomerName = (await _context.Customers.FindAsync(invoice.CustomerId))!.Name,
+            CustomerName = $"{customer.Name} {customer.Surname}",
             CreatedDate = invoice.CreatedDate,
             DueDate = invoice.DueDate,
             TotalAmount = invoice.TotalAmount,
