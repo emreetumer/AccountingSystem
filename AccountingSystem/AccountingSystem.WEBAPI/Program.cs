@@ -1,6 +1,8 @@
 using AccountingSystem.WEBAPI.Context;
 using AccountingSystem.WEBAPI.Services.Customer.Abstract;
 using AccountingSystem.WEBAPI.Services.Customer.Concrete;
+using AccountingSystem.WEBAPI.Services.Invoices.Abstract;
+using AccountingSystem.WEBAPI.Services.Invoices.Concrete;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,6 +15,7 @@ builder.Services.AddDbContext<ApplicationDbContext>(options =>
 });
 
 builder.Services.AddScoped<ICustomerService, CustomerService>();
+builder.Services.AddScoped<IInvoiceService, InvoiceService>();
 
 
 var app = builder.Build();
