@@ -9,4 +9,5 @@ public sealed class Payment : BaseEntity
 
     public decimal Amount { get; set; } // Tutar
     public DateTime PaymentDate { get; set; } = DateTime.UtcNow; // Ödeme tarihi
+    public string? Description { get; set; }
 }
