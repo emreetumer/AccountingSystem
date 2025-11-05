@@ -28,6 +28,7 @@ public class PaymentService : IPaymentService
             InvoiceId = p.InvoiceId,
             CustomerName = $"{p.Invoice!.Customer!.Name} {p.Invoice.Customer.Surname}",
             Amount = p.Amount,
+            KalanAmount = p.Invoice.Customer.CurrentDebt,
             PaymentDate = p.PaymentDate,
             Description = p.Description
         }).ToList();
@@ -68,13 +69,21 @@ public class PaymentService : IPaymentService
         }
 
         var customer = invoice.Customer!;
+
         if (customer == null)
         {
             throw new InvalidOperationException($"Bu fatura için müşteri bilgisi bulunamadı.");
         }
 
         // Ödeme işlemi
-        invoice.PaidAmount += request.Amount;
+        //invoice.PaidAmount += request.Amount;
+
+        invoice.PaidAmount = invoice.PaidAmount + request.Amount;
+
+        if (invoice.PaidAmount > invoice.TotalAmount)
+        {
+            throw new InvalidOperationException($"Bu faturanın toplam borcu {invoice.Customer!.CurrentDebt}dur. Siz {invoice.PaidAmount - invoice.TotalAmount} lira kadar fazla ödeme yaptınız. Lütfen borcunuz kadar ödeme yapınız ");
+        }
 
         // Müşterinin toplam borcunu azalt
         customer.CurrentDebt -= request.Amount;
