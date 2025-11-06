@@ -1,6 +1,8 @@
 ﻿using AccountingSystem.WEBAPI.Context;
 using AccountingSystem.WEBAPI.DTOs.Payments;
+using AccountingSystem.WEBAPI.Hubs;
 using AccountingSystem.WEBAPI.Services.Payment.Abstract;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace AccountingSystem.WEBAPI.Services.Payment.Concrete;
@@ -8,10 +10,12 @@ namespace AccountingSystem.WEBAPI.Services.Payment.Concrete;
 public class PaymentService : IPaymentService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IHubContext<NotificationHub> _hub;
 
-    public PaymentService(ApplicationDbContext context)
+    public PaymentService(ApplicationDbContext context, IHubContext<NotificationHub> hub)
     {
         _context = context;
+        _hub = hub;
     }
 
     public async Task<List<PaymentListDto>> GetAllAsync()
@@ -76,8 +80,6 @@ public class PaymentService : IPaymentService
         }
 
         // Ödeme işlemi
-        //invoice.PaidAmount += request.Amount;
-
         invoice.PaidAmount = invoice.PaidAmount + request.Amount;
 
         if (invoice.PaidAmount > invoice.TotalAmount)
@@ -98,6 +100,34 @@ public class PaymentService : IPaymentService
 
         _context.Payments.Add(payment);
         await _context.SaveChangesAsync();
+
+        #region SignalR
+        // 1) Ödeme alındı olayı (dashboard + ilgili müşteri grubu)
+        await _hub.Clients.Group("dashboard").SendAsync("PaymentReceived", new
+        {
+            paymentId = payment.Id,
+            invoiceId = invoice.Id,
+            customerId = customer.Id,
+            amount = payment.Amount,
+            paymentDate = payment.PaymentDate
+        });
+
+        await _hub.Clients.Group($"customer-{customer.Id}").SendAsync("PaymentReceived", new
+        {
+            paymentId = payment.Id,
+            invoiceId = invoice.Id,
+            amount = payment.Amount,
+            paymentDate = payment.PaymentDate
+        });
+
+        // 2) Müşteri borcu güncellendi olayı
+        await _hub.Clients.Group($"customer-{customer.Id}").SendAsync("CustomerDebtUpdated", new
+        {
+            customerId = customer.Id,
+            currentDebt = customer.CurrentDebt
+        });
+
+        #endregion
 
         return new PaymentListDto
         {

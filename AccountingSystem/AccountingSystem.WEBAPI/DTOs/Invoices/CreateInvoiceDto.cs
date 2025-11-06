@@ -4,5 +4,7 @@ public sealed class CreateInvoiceDto
 {
     public int CustomerId { get; set; }
     public DateTime DueDate { get; set; }
-    public List<InvoiceItemDto> Items { get; set; } = new();
+    //public List<InvoiceItemDto> Items { get; set; } = new();
+    public List<CreateInvoiceItemDto> Items { get; set; } = new();
+
 }

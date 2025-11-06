@@ -1,7 +1,9 @@
 ﻿using AccountingSystem.WEBAPI.Context;
 using AccountingSystem.WEBAPI.DTOs.Invoices;
 using AccountingSystem.WEBAPI.Entities;
+using AccountingSystem.WEBAPI.Hubs;
 using AccountingSystem.WEBAPI.Services.Invoices.Abstract;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 
 namespace AccountingSystem.WEBAPI.Services.Invoices.Concrete;
@@ -9,10 +11,12 @@ namespace AccountingSystem.WEBAPI.Services.Invoices.Concrete;
 public class InvoiceService : IInvoiceService
 {
     private readonly ApplicationDbContext _context;
+    private readonly IHubContext<NotificationHub> _hub;
 
-    public InvoiceService(ApplicationDbContext context)
+    public InvoiceService(ApplicationDbContext context, IHubContext<NotificationHub> hub)
     {
         _context = context;
+        _hub = hub;
     }
 
     public async Task<InvoiceDetailDto?> GetByIdAsync(int id)
@@ -40,7 +44,6 @@ public class InvoiceService : IInvoiceService
             {
                 ProductId = ii.ProductId,
                 Quantity = ii.Quantity,
-                UnitPrice = ii.UnitPrice
             }).ToList()
         };
     }
@@ -66,13 +69,25 @@ public class InvoiceService : IInvoiceService
     public async Task<InvoiceDetailDto> CreateAsync(CreateInvoiceDto request)
     {
         var customer = await _context.Customers.FindAsync(request.CustomerId);
-
         if (customer == null)
         {
             throw new InvalidOperationException($"CustomerId {request.CustomerId} bulunamadı.");
         }
 
-        var totalAmount = request.Items.Sum(x => x.Quantity * x.UnitPrice);
+        var productIds = request.Items.Select(x => x.ProductId).Distinct().ToList();
+
+        var products = await _context.Products
+            .Where(p => productIds.Contains(p.Id))
+            .ToDictionaryAsync(p => p.Id, p => p.UnitPrice);
+
+
+        var missingProducts = productIds.Except(products.Keys).ToList();
+        if (missingProducts.Any())
+        {
+            throw new InvalidOperationException($"Şu ProductId değerleri bulunamadı: {string.Join(", ", missingProducts)}");
+        }
+
+        var totalAmount = request.Items.Sum(i => i.Quantity * products[i.ProductId]);
 
         var invoice = new Invoice
         {
@@ -85,19 +100,40 @@ public class InvoiceService : IInvoiceService
 
         foreach (var item in request.Items)
         {
-            // Ürünlerin (Product) varlığı ve birim fiyatlarının kontrolü bu noktada yapılmalıdır!
+            var unitPrice = products[item.ProductId];
+
             invoice.InvoiceItems.Add(new InvoiceItem
             {
                 ProductId = item.ProductId,
                 Quantity = item.Quantity,
-                UnitPrice = item.UnitPrice
+                UnitPrice = unitPrice
             });
         }
+
 
         customer.CurrentDebt += totalAmount;
 
         _context.Invoices.Add(invoice);
         await _context.SaveChangesAsync();
+
+        #region SignalR
+        await _hub.Clients.Group("dashboard").SendAsync("InvoiceCreated", new
+        {
+            invoiceId = invoice.Id,
+            customerId = customer.Id,
+            customerName = $"{customer.Name} {customer.Surname}",
+            totalAmount = invoice.TotalAmount,
+            kalanAmount = customer.CurrentDebt,
+            createdDate = invoice.CreatedDate,
+            dueDate = invoice.DueDate
+        });
+
+        await _hub.Clients.Group($"customer-{customer.Id}").SendAsync("CustomerDebtUpdated", new
+        {
+            customerId = customer.Id,
+            currentDebt = customer.CurrentDebt
+        });
+        #endregion
 
         return new InvoiceDetailDto
         {
@@ -115,6 +151,7 @@ public class InvoiceService : IInvoiceService
             }).ToList()
         };
     }
+
 
     public async Task<bool> DeleteAsync(int id)
     {
